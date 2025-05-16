@@ -24,7 +24,7 @@ impl ControllingUnit for Director {
 }
 
 impl Director {
-    pub fn new(sim: &mut Simulation) -> Option<&Self> {
+    pub fn new(sim: &mut Simulation) -> Option<&mut Self> {
         let dir = Self {
             subordinates: vec![],
         };
@@ -49,8 +49,8 @@ impl Simulation {
             })
         }
     }
-    fn register_director(&mut self, director: Director) -> Option<&Director> {
+    fn register_director(&mut self, director: Director) -> Option<&mut Director> {
         self.controlled_directors.push(director);
-        self.controlled_directors.last()
+        self.controlled_directors.last_mut()
     }
 }

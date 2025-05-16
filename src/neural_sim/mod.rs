@@ -2,10 +2,6 @@ use time_management::ControllingUnit;
 
 pub mod time_management;
 
-trait Leaky {
-    fn perform_step_leak(self) -> ();
-}
-
 pub trait TimeDependent {
     fn register(self, director: &mut time_management::Director);
 }
@@ -25,11 +21,11 @@ impl LifNeuron {
     }
 }
 
-impl Leaky for LifNeuron {
-    fn perform_step_leak(mut self) -> () {
-        self.current_potential -= self.leak_rate
-    }
-}
+// impl Leaky for LifNeuron {
+//     fn perform_step_leak(mut self) -> () {
+//         self.current_potential -= self.leak_rate
+//     }
+// }
 
 impl TimeDependent for LifNeuron {
     fn register(self, director: &mut time_management::Director){
