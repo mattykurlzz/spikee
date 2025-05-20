@@ -1,44 +1,73 @@
+pub mod event_schedule_entry;
+
 use crate::neural_sim::LifNeuron;
+use event_schedule_entry::{Callable, EventEntry};
 use std::io::{Error, ErrorKind};
 
 static SIM_DEFINED: bool = false;
 
-pub trait ControllingUnit {
-    fn add_to_registry(&mut self, added_subordinate: LifNeuron);
+pub trait ControllingUnit<F>
+where
+    F: FnOnce(i32),
+{
+    fn add_to_registry<'a>(&'a mut self, added_subordinate: LifNeuron) -> Option<&'a mut LifNeuron>;
     fn get_len(&self) -> usize;
+    fn start_planned(&mut self);
+    fn add_event(&mut self, event: EventEntry<F>);
 }
 
-#[derive(Debug)]
-pub struct Director {
+pub struct Director<F>
+where
+    F: FnOnce(i32),
+{
     subordinates: Vec<LifNeuron>,
+    events_queue: Vec<EventEntry<F>>,
 }
 
-impl ControllingUnit for Director {
-    fn add_to_registry(&mut self, added_subordinate: LifNeuron){
+impl<F> ControllingUnit<F> for Director<F>
+where
+    F: FnOnce(i32),
+{
+    fn add_to_registry<'a>(&'a mut self, added_subordinate: LifNeuron) -> Option<&'a mut LifNeuron> {
         self.subordinates.push(added_subordinate);
+        self.subordinates.last_mut()
     }
 
     fn get_len(&self) -> usize {
         self.subordinates.len()
     }
-}
 
-impl Director {
-    pub fn new(sim: &mut Simulation) -> Option<&mut Self> {
-        let dir = Self {
-            subordinates: vec![],
-        };
-        sim.register_director(dir)
+    fn start_planned(&mut self) {
+        // for event_entry in self.events_queue {
+        //     event_entry.call();
+        // }
+    }
+
+    fn add_event(&mut self, event: EventEntry<F>) {
+        self.events_queue.push(event);
     }
 }
 
-#[derive(Debug)]
-pub struct Simulation {
-    controlled_directors: Vec<Director>,
+impl<F> Director<F> 
+where F: FnOnce(i32){
+    pub fn new() -> Option<Self> {
+        Some(Self {
+            subordinates: vec![],
+            events_queue: vec![],
+        })
+        // sim.register_director(dir)
+    }
+}
+
+pub struct Simulation<F>
+where F: FnOnce(i32) {
+    controlled_directors: Vec<Director<F>>,
     sim_time: u32,
 }
 
-impl Simulation {
+impl<F> Simulation<F>
+where F: FnOnce(i32)
+{
     pub fn new(sim_time: u32) -> Result<Self, String> {
         if SIM_DEFINED {
             Err("FileAlreadyExistsError: only one Simulation entity can be defined!".to_string())
@@ -49,8 +78,13 @@ impl Simulation {
             })
         }
     }
-    fn register_director(&mut self, director: Director) -> Option<&mut Director> {
+    pub fn register_director(&mut self, director: Director<F>) -> Option<&mut Director<F>> {
         self.controlled_directors.push(director);
         self.controlled_directors.last_mut()
+    }
+    pub fn start(&mut self) {
+        for director in &mut self.controlled_directors {
+            director.start_planned();
+        }
     }
 }
