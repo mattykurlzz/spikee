@@ -1,73 +1,64 @@
-pub mod event_schedule_entry;
+use std::cell::Ref;
+use std::cell::RefCell;
+use std::thread; // todo: use Arc<Mutex<T>> to allow for safe concurrency?
+use std::sync::{Arc, Mutex, Condvar};
 
-use crate::neural_sim::LifNeuron;
-use event_schedule_entry::{Callable, EventEntry};
+use crate::neural_sim::{LifNeuron, Neuron};
 use std::io::{Error, ErrorKind};
 
 static SIM_DEFINED: bool = false;
 
-pub trait ControllingUnit<F>
-where
-    F: FnOnce(i32),
-{
-    fn add_to_registry<'a>(&'a mut self, added_subordinate: LifNeuron) -> Option<&'a mut LifNeuron>;
+pub trait ControllingUnit {
+    fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>);
     fn get_len(&self) -> usize;
-    fn start_planned(&mut self);
-    fn add_event(&mut self, event: EventEntry<F>);
+    fn start_planned(&self);
 }
 
-pub struct Director<F>
-where
-    F: FnOnce(i32),
-{
-    subordinates: Vec<LifNeuron>,
-    events_queue: Vec<EventEntry<F>>,
+pub struct Director {
+    subordinates: Vec<Arc<Mutex<dyn Neuron>>>,
 }
 
-impl<F> ControllingUnit<F> for Director<F>
-where
-    F: FnOnce(i32),
-{
-    fn add_to_registry<'a>(&'a mut self, added_subordinate: LifNeuron) -> Option<&'a mut LifNeuron> {
+impl ControllingUnit for Director {
+    fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>) {
         self.subordinates.push(added_subordinate);
-        self.subordinates.last_mut()
     }
 
     fn get_len(&self) -> usize {
         self.subordinates.len()
     }
 
-    fn start_planned(&mut self) {
-        // for event_entry in self.events_queue {
-        //     event_entry.call();
-        // }
-    }
+    fn start_planned(&self) {
+        let mut thread_handles = Vec::new();
+        for subord_trait in &self.subordinates {
+            let self_copy = Arc::clone(subord_trait); 
+            let subord_thread_handle = thread::spawn(move || {
+                let mut mutex = self_copy.lock().unwrap();
+                mutex.init(0);
+        });
+            thread_handles.push(subord_thread_handle);
+        }
 
-    fn add_event(&mut self, event: EventEntry<F>) {
-        self.events_queue.push(event);
+        for handle in thread_handles {
+            handle.join().unwrap();
+        }
     }
 }
 
-impl<F> Director<F> 
-where F: FnOnce(i32){
+impl Director {
     pub fn new() -> Option<Self> {
         Some(Self {
             subordinates: vec![],
-            events_queue: vec![],
         })
         // sim.register_director(dir)
     }
 }
 
-pub struct Simulation<F>
-where F: FnOnce(i32) {
-    controlled_directors: Vec<Director<F>>,
+pub struct Simulation {
+    controlled_directors: Vec<Director>,
     sim_time: u32,
 }
 
-impl<F> Simulation<F>
-where F: FnOnce(i32)
-{
+impl Simulation {
     pub fn new(sim_time: u32) -> Result<Self, String> {
         if SIM_DEFINED {
             Err("FileAlreadyExistsError: only one Simulation entity can be defined!".to_string())
@@ -78,7 +69,7 @@ where F: FnOnce(i32)
             })
         }
     }
-    pub fn register_director(&mut self, director: Director<F>) -> Option<&mut Director<F>> {
+    pub fn register_director(&mut self, director: Director) -> Option<&mut Director> {
         self.controlled_directors.push(director);
         self.controlled_directors.last_mut()
     }

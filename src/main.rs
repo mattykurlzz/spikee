@@ -12,10 +12,12 @@ fn main() {
     let mut sim: Simulation = Simulation::new(sim_time).expect("Couldn't create sim");
 
     let director: Director = Director::new().expect("None Value for Director!");
-    let mut director: &mut Director = sim.register_director(director).expect("{ErrorKind::Other}" );
+    let director: &mut Director = sim.register_director(director).expect("{ErrorKind::Other}" );
 
-    let neuron: LifNeuron = LifNeuron::new(0.1);
-    neuron.register(&mut director, true);
+    let neuron_1: LifNeuron = LifNeuron::new(0.1);
+    let neuron_2: LifNeuron = LifNeuron::new(0.15);
+    neuron_1.register(director);
+    neuron_2.register(director);
     
     sim.start();
 }
