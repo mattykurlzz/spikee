@@ -43,7 +43,7 @@ pub trait TimeDependent{
 pub trait Neuron: Send + Sync {
     fn init(&mut self, time_step: i32);
     fn recieve_signal(&mut self, time_step: i32, signal: f32);
-    fn emmit_signal(&mut self);
+    fn emmit_signal(&mut self, time_step: i32);
 }
 
 #[derive(Debug)]
@@ -63,18 +63,23 @@ impl LifNeuron {
             spikes_queue: Vec::new(),
         }
     }
+    pub fn add_events_entry(&mut self, step: i32) {
+        self.spikes_queue.push(step);
+        self.spikes_queue.sort();
+    }
 }
 
 impl Neuron for LifNeuron {
     fn init(&mut self, time_step: i32) {
         println!("Called init!. My leak is {}", self.leak_rate);
-        self.emmit_signal();
+        self.emmit_signal(time_step);
     }
     fn recieve_signal(&mut self, time_step: i32, signal: f32) {
         println!("Called recv_sig");
     }
-    fn emmit_signal(&mut self) {
-        println!("Called emmit");
+    fn emmit_signal(&mut self, time_step: i32) {
+        println!("Called emmit registrator");
+        self.add_events_entry(time_step);
     }
 }
 // impl Leaky for LifNeuron {
