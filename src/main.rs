@@ -1,5 +1,5 @@
 use neural_sim::neuron::TimeDependent;
-use neural_sim::Director;
+use neural_sim::{ControllingUnit, Director};
 use neural_sim::neuron::LifNeuron;
 use neural_sim::Simulation;
 
@@ -16,6 +16,8 @@ fn main() {
     let neuron_2: LifNeuron = LifNeuron::new(0.15);
     neuron_1.register(director);
     neuron_2.register(director);
+    
+    director.create_link(0, 1);
     
     sim.start();
 }

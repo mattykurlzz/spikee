@@ -4,13 +4,17 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use neuron::Neuron; // todo: use Arc<Mutex<T>> to allow for safe concurrency?
+use synapse::SynapseGroup;
 
 pub mod neuron;
+pub mod synapse;  
 
 static SIM_DEFINED: bool = false;
 
+type NeuronUniqueId = u32;
+
 pub trait ControllingUnit {
-    fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>);
+    fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>) -> NeuronUniqueId;
     fn start_planned(&mut self);
     fn increment_time(&mut self);
     fn spawn_neuron_thread_closure(
@@ -19,16 +23,30 @@ pub trait ControllingUnit {
         sim_time_clone: Arc<RwLock<u32>>,
         barrier_clone: Arc<Barrier>,
     ) -> impl Fn();
+    fn create_link(&mut self, source: NeuronUniqueId, destination: NeuronUniqueId);
+}
+
+struct NeuronRegistrator {
+    next_available_id: NeuronUniqueId,
+    assigned_id_vec: Vec<NeuronUniqueId>,
+}
+
+impl NeuronRegistrator {
+    fn book_id(&mut self) -> NeuronUniqueId {
+        // todo: book id's, create pairs of id-recepient_function, pass ids to synapses, call recepient_functions whenever neuron fires
+    }
 }
 
 pub struct Director {
     subordinates: Vec<Arc<Mutex<dyn Neuron>>>,
     sim_time: u32,
     cur_time: u32,
+    
+    tmp_source_dest_pairs: Vec<[u32; 2]>,
 }
 
 impl ControllingUnit for Director {
-    fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>) {
+    fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>) -> NeuronUniqueId {
         self.subordinates.push(added_subordinate);
     }
 
@@ -57,6 +75,8 @@ impl ControllingUnit for Director {
                 while lock.get_earliest_event_available().unwrap() {
                     if *lock.get_earliest_event().unwrap() == cur_time {
                         // ToDo: scan routing table and emmit signal
+                        lock.fire();
+                        
                         lock.pop_earliest_event();
                     } else {
                         break;
@@ -102,6 +122,10 @@ impl ControllingUnit for Director {
             handle.join().unwrap();
         }
     }
+    
+    fn create_link(&mut self, source: NeuronUniqueId, destination: NeuronUniqueId) {
+        self.tmp_source_dest_pairs.push([source, destination]);
+    }
 }
 
 impl Director {
@@ -110,6 +134,7 @@ impl Director {
             subordinates: vec![],
             sim_time,
             cur_time: 0,
+            tmp_source_dest_pairs: vec![],
         })
         // sim.register_director(dir)
     }
