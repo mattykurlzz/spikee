@@ -1,7 +1,7 @@
-use neural_sim::TimeDependent;
-use neural_sim::time_management::Director;
-use neural_sim::LifNeuron;
-use neural_sim::time_management::Simulation;
+use neural_sim::neuron::TimeDependent;
+use neural_sim::Director;
+use neural_sim::neuron::LifNeuron;
+use neural_sim::Simulation;
 
 mod neural_sim;
 

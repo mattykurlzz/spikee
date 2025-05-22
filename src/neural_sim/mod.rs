@@ -1,117 +1,141 @@
-use std::{sync::{Arc, Mutex}};
-use time_management::ControllingUnit;
+use std::sync::Barrier;
+use std::sync::RwLock;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-/* mod neuron_state{
-    #[derive(Debug)]
-    pub struct NeuronState {
-        spike: bool,
-        waiting_next_time_step: bool,
+use neuron::Neuron; // todo: use Arc<Mutex<T>> to allow for safe concurrency?
+
+pub mod neuron;
+
+static SIM_DEFINED: bool = false;
+
+pub trait ControllingUnit {
+    fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>);
+    fn start_planned(&mut self);
+    fn increment_time(&mut self);
+    fn spawn_neuron_thread_closure(
+        neuron_copy: Arc<Mutex<dyn Neuron>>,
+        cur_time_clone: Arc<RwLock<u32>>,
+        sim_time_clone: Arc<RwLock<u32>>,
+        barrier_clone: Arc<Barrier>,
+    ) -> impl Fn();
+}
+
+pub struct Director {
+    subordinates: Vec<Arc<Mutex<dyn Neuron>>>,
+    sim_time: u32,
+    cur_time: u32,
+}
+
+impl ControllingUnit for Director {
+    fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>) {
+        self.subordinates.push(added_subordinate);
     }
 
-    impl NeuronState {
-        pub fn new() -> Option<Self> {
-            Some(Self {
-                spike: false,
-                waiting_next_time_step: false,
+    fn increment_time(&mut self) {
+        self.cur_time += 1;
+    }
+
+    fn spawn_neuron_thread_closure(
+        neuron_copy: Arc<Mutex<dyn Neuron>>,
+        cur_time_clone: Arc<RwLock<u32>>,
+        sim_time_clone: Arc<RwLock<u32>>,
+        barrier_clone: Arc<Barrier>,
+    ) -> impl Fn() {
+        move || {
+            let mut lock = neuron_copy.lock().unwrap();
+            lock.init(0);
+
+            let mut cur_time = *cur_time_clone.read().unwrap();
+            while cur_time != *sim_time_clone.read().unwrap() {
+                println!(
+                    "a step passed {}, {}",
+                    cur_time,
+                    *sim_time_clone.read().unwrap()
+                );
+                barrier_clone.wait(); // sync before time increment
+                while lock.get_earliest_event_available().unwrap() {
+                    if *lock.get_earliest_event().unwrap() == cur_time {
+                        // ToDo: scan routing table and emmit signal
+                        lock.pop_earliest_event();
+                    } else {
+                        break;
+                    }
+                }
+                barrier_clone.wait(); // sync after time increment
+                cur_time = *cur_time_clone.read().unwrap();
+            }
+            println!("exited process")
+        }
+    }
+
+    fn start_planned(&mut self) {
+        let mut thread_handles = Vec::new();
+        let (cur_time_arc, sim_time_arc) = (
+            Arc::new(RwLock::new(self.cur_time)),
+            Arc::new(RwLock::new(self.sim_time)),
+        );
+        let timestep_barrier = Arc::new(Barrier::new(self.subordinates.len() + 1));
+
+        for subord_trait in &self.subordinates {
+            let self_copy = Arc::clone(subord_trait);
+            let (cur_time_clone, sim_time_clone) =
+                (Arc::clone(&cur_time_arc), Arc::clone(&sim_time_arc));
+            let barrier_clone = Arc::clone(&timestep_barrier);
+            let thread_closure = Self::spawn_neuron_thread_closure( self_copy, cur_time_clone, sim_time_clone, barrier_clone);
+
+            let subord_thread_handle = thread::spawn(thread_closure);
+            thread_handles.push(subord_thread_handle);
+        }
+
+        {
+            let main_thread_barrier = Arc::clone(&timestep_barrier);
+            while self.cur_time != self.sim_time {
+                main_thread_barrier.wait();
+                self.increment_time();
+                *cur_time_arc.write().unwrap() = self.cur_time;
+                main_thread_barrier.wait();
+            }
+        }
+
+        for handle in thread_handles {
+            handle.join().unwrap();
+        }
+    }
+}
+
+impl Director {
+    pub fn new(sim_time: u32) -> Option<Self> {
+        Some(Self {
+            subordinates: vec![],
+            sim_time,
+            cur_time: 0,
+        })
+        // sim.register_director(dir)
+    }
+}
+
+pub struct Simulation {
+    controlled_directors: Vec<Director>,
+}
+
+impl Simulation {
+    pub fn new() -> Result<Self, String> {
+        if SIM_DEFINED {
+            Err("FileAlreadyExistsError: only one Simulation entity can be defined!".to_string())
+        } else {
+            Ok(Self {
+                controlled_directors: Vec::new(),
             })
         }
-        fn null_every(&mut self) {
-            self.spike = false;
+    }
+    pub fn register_director(&mut self, director: Director) -> Option<&mut Director> {
+        self.controlled_directors.push(director);
+        self.controlled_directors.last_mut()
+    }
+    pub fn start(&mut self) {
+        for director in &mut self.controlled_directors {
+            director.start_planned();
         }
-        pub fn set_spike_exclusive(&mut self, state: bool) {
-            self.null_every();
-            self.spike = state;
-            self.waiting_next_time_step = true;
-        }
-        pub fn get_blocked(&mut self) -> bool {
-            self.waiting_next_time_step
-        }
-        pub fn get_spike(&mut self) -> bool {
-            self.spike
-        }
-    }
-} */
-
-// use neuron_state::NeuronState;
-
-pub mod time_management;
-
-pub trait TimeDependent{
-    fn register(self, director: &mut time_management::Director);
-}
-
-pub trait Neuron: Send + Sync {
-    fn init(&mut self, time_step: u32);
-    // fn recieve_signal(&mut self, time_step: u32, signal: f32);
-    fn emmit_signal(&mut self, time_step: u32);
-    fn get_earliest_event(&self) -> Option<&u32>;
-    fn get_earliest_event_available(&self) -> Option<bool>;
-    fn pop_earliest_event(&mut self);
-}
-
-#[derive(Debug)]
-pub struct LifNeuron {
-    // current_potential: f32,
-    leak_rate: f32,
-    // state: NeuronState,
-    spikes_queue: Vec<u32>,
-}
-
-impl LifNeuron {
-    pub fn new(leak: f32) -> Self {
-        Self {
-            // current_potential: 0.,
-            leak_rate: leak,
-            // state: NeuronState::new().unwrap(),
-            spikes_queue: Vec::new(),
-        }
-    }
-    pub fn add_events_entry(&mut self, step: u32) {
-        self.spikes_queue.push(step);
-        self.spikes_queue.sort();
-    }
-    pub fn get_earliest_event_int(&self) -> Option<&u32> {
-        self.spikes_queue.first()
-    }
-    pub fn pop_earliest_event_int(&mut self){
-        self.spikes_queue.remove(0);
-    }
-}
-
-impl Neuron for LifNeuron {
-    fn init(&mut self, time_step: u32) {
-        println!("Called init!. My leak is {}", self.leak_rate);
-        self.emmit_signal(time_step);
-    }
-    // fn recieve_signal(&mut self, time_step: u32, signal: f32) {
-    //     println!("Called recv_sig");
-    // }
-    fn emmit_signal(&mut self, time_step: u32) {
-        println!("Called emmit registrator");
-        self.add_events_entry(time_step);
-    }
-    fn get_earliest_event(&self) -> Option<&u32> {
-        self.get_earliest_event_int()
-    }
-    fn pop_earliest_event(&mut self) {
-        self.pop_earliest_event_int();
-    }
-    fn get_earliest_event_available(&self) -> Option<bool> {
-        match self.get_earliest_event_int() {
-            Some(_) => Some(true), 
-            None => Some(false)
-        }
-    }
-}
-// impl Leaky for LifNeuron {
-//     fn perform_step_leak(mut self) -> () {
-//         self.current_potential -= self.leak_rate
-//     }
-// }
-
-impl TimeDependent for LifNeuron{
-    fn register(self, director: &mut time_management::Director) {
-        let passed_trait: Arc<Mutex<dyn Neuron>> = Arc::new(Mutex::new(self));
-        director.add_to_registry(passed_trait); // todo: add meaningfull error handling
     }
 }
