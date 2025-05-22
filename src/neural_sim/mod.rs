@@ -1,7 +1,7 @@
-use std::{sync::{Arc, Mutex, Condvar}, thread};
+use std::{sync::{Arc, Mutex}};
 use time_management::ControllingUnit;
 
-mod neuron_state{
+/* mod neuron_state{
     #[derive(Debug)]
     pub struct NeuronState {
         spike: bool,
@@ -30,9 +30,9 @@ mod neuron_state{
             self.spike
         }
     }
-}
+} */
 
-use neuron_state::NeuronState;
+// use neuron_state::NeuronState;
 
 pub mod time_management;
 
@@ -41,45 +41,66 @@ pub trait TimeDependent{
 }
 
 pub trait Neuron: Send + Sync {
-    fn init(&mut self, time_step: i32);
-    fn recieve_signal(&mut self, time_step: i32, signal: f32);
-    fn emmit_signal(&mut self, time_step: i32);
+    fn init(&mut self, time_step: u32);
+    // fn recieve_signal(&mut self, time_step: u32, signal: f32);
+    fn emmit_signal(&mut self, time_step: u32);
+    fn get_earliest_event(&self) -> Option<&u32>;
+    fn get_earliest_event_available(&self) -> Option<bool>;
+    fn pop_earliest_event(&mut self);
 }
 
 #[derive(Debug)]
 pub struct LifNeuron {
-    current_potential: f32,
+    // current_potential: f32,
     leak_rate: f32,
-    state: NeuronState,
-    spikes_queue: Vec<i32>,
+    // state: NeuronState,
+    spikes_queue: Vec<u32>,
 }
 
 impl LifNeuron {
     pub fn new(leak: f32) -> Self {
         Self {
-            current_potential: 0.,
+            // current_potential: 0.,
             leak_rate: leak,
-            state: NeuronState::new().unwrap(),
+            // state: NeuronState::new().unwrap(),
             spikes_queue: Vec::new(),
         }
     }
-    pub fn add_events_entry(&mut self, step: i32) {
+    pub fn add_events_entry(&mut self, step: u32) {
         self.spikes_queue.push(step);
         self.spikes_queue.sort();
+    }
+    pub fn get_earliest_event_int(&self) -> Option<&u32> {
+        self.spikes_queue.first()
+    }
+    pub fn pop_earliest_event_int(&mut self){
+        self.spikes_queue.remove(0);
     }
 }
 
 impl Neuron for LifNeuron {
-    fn init(&mut self, time_step: i32) {
+    fn init(&mut self, time_step: u32) {
         println!("Called init!. My leak is {}", self.leak_rate);
         self.emmit_signal(time_step);
     }
-    fn recieve_signal(&mut self, time_step: i32, signal: f32) {
-        println!("Called recv_sig");
-    }
-    fn emmit_signal(&mut self, time_step: i32) {
+    // fn recieve_signal(&mut self, time_step: u32, signal: f32) {
+    //     println!("Called recv_sig");
+    // }
+    fn emmit_signal(&mut self, time_step: u32) {
         println!("Called emmit registrator");
         self.add_events_entry(time_step);
+    }
+    fn get_earliest_event(&self) -> Option<&u32> {
+        self.get_earliest_event_int()
+    }
+    fn pop_earliest_event(&mut self) {
+        self.pop_earliest_event_int();
+    }
+    fn get_earliest_event_available(&self) -> Option<bool> {
+        match self.get_earliest_event_int() {
+            Some(_) => Some(true), 
+            None => Some(false)
+        }
     }
 }
 // impl Leaky for LifNeuron {

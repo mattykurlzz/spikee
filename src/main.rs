@@ -1,5 +1,3 @@
-use std::io::ErrorKind;
-
 use neural_sim::TimeDependent;
 use neural_sim::time_management::Director;
 use neural_sim::LifNeuron;
@@ -9,7 +7,7 @@ mod neural_sim;
 
 fn main() {
     let sim_time: u32 = 10; // sim time == 100 ticks
-    let mut sim: Simulation = Simulation::new(sim_time).expect("Couldn't create sim");
+    let mut sim: Simulation = Simulation::new().expect("Couldn't create sim");
 
     let director: Director = Director::new(sim_time).expect("None Value for Director!");
     let director: &mut Director = sim.register_director(director).expect("{ErrorKind::Other}" );

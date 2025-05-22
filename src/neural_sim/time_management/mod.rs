@@ -1,20 +1,22 @@
-use std::cell::Ref;
-use std::cell::RefCell;
 use std::sync::Barrier;
 use std::sync::RwLock;
+use std::sync::{Arc, Mutex};
 use std::thread; // todo: use Arc<Mutex<T>> to allow for safe concurrency?
-use std::sync::{Arc, Mutex, Condvar};
 
-use crate::neural_sim::{LifNeuron, Neuron};
-use std::io::{Error, ErrorKind};
+use crate::neural_sim::Neuron;
 
 static SIM_DEFINED: bool = false;
 
 pub trait ControllingUnit {
     fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>);
-    fn get_len(&self) -> usize;
     fn start_planned(&mut self);
     fn increment_time(&mut self);
+    fn spawn_neuron_thread_closure(
+        neuron_copy: Arc<Mutex<dyn Neuron>>,
+        cur_time_clone: Arc<RwLock<u32>>,
+        sim_time_clone: Arc<RwLock<u32>>,
+        barrier_clone: Arc<Barrier>,
+    ) -> impl Fn();
 }
 
 pub struct Director {
@@ -28,46 +30,70 @@ impl ControllingUnit for Director {
         self.subordinates.push(added_subordinate);
     }
 
-    fn get_len(&self) -> usize {
-        self.subordinates.len()
-    }
-    
     fn increment_time(&mut self) {
         self.cur_time += 1;
     }
 
+    fn spawn_neuron_thread_closure(
+        neuron_copy: Arc<Mutex<dyn Neuron>>,
+        cur_time_clone: Arc<RwLock<u32>>,
+        sim_time_clone: Arc<RwLock<u32>>,
+        barrier_clone: Arc<Barrier>,
+    ) -> impl Fn() {
+        move || {
+            let mut lock = neuron_copy.lock().unwrap();
+            lock.init(0);
+
+            let mut cur_time = *cur_time_clone.read().unwrap();
+            while cur_time != *sim_time_clone.read().unwrap() {
+                println!(
+                    "a step passed {}, {}",
+                    cur_time,
+                    *sim_time_clone.read().unwrap()
+                );
+                barrier_clone.wait(); // sync before time increment
+                while lock.get_earliest_event_available().unwrap() {
+                    if *lock.get_earliest_event().unwrap() == cur_time {
+                        // ToDo: scan routing table and emmit signal
+                        lock.pop_earliest_event();
+                    } else {
+                        break;
+                    }
+                }
+                barrier_clone.wait(); // sync after time increment
+                cur_time = *cur_time_clone.read().unwrap();
+            }
+            println!("exited process")
+        }
+    }
+
     fn start_planned(&mut self) {
         let mut thread_handles = Vec::new();
-        let cur_time_arc = Arc::new(RwLock::new(self.cur_time));
-        let sim_time_arc = Arc::new(RwLock::new(self.sim_time));
+        let (cur_time_arc, sim_time_arc) = (
+            Arc::new(RwLock::new(self.cur_time)),
+            Arc::new(RwLock::new(self.sim_time)),
+        );
         let timestep_barrier = Arc::new(Barrier::new(self.subordinates.len() + 1));
-        let main_thread_barrier = Arc::clone(&timestep_barrier);
-        
-        for subord_trait in &self.subordinates {
-            let self_copy = Arc::clone(subord_trait); 
-            let (cut_time_clone, sim_time_clone) = (Arc::clone(&cur_time_arc), Arc::clone(&sim_time_arc));
-            let barrier_clone = Arc::clone(&timestep_barrier);
 
-            let subord_thread_handle = thread::spawn(move || {
-                let mut lock = self_copy.lock().unwrap();
-                lock.init(0);
-                
-                barrier_clone.wait(); // wait for all threads in order to sync time shift
-                while *cut_time_clone.read().unwrap() != *sim_time_clone.read().unwrap() {
-                    println!("a step passed {}, {}", *cut_time_clone.read().unwrap(), *sim_time_clone.read().unwrap());
-                    barrier_clone.wait();
-                    barrier_clone.wait();
-                }
-        });
+        for subord_trait in &self.subordinates {
+            let self_copy = Arc::clone(subord_trait);
+            let (cur_time_clone, sim_time_clone) =
+                (Arc::clone(&cur_time_arc), Arc::clone(&sim_time_arc));
+            let barrier_clone = Arc::clone(&timestep_barrier);
+            let thread_closure = Self::spawn_neuron_thread_closure( self_copy, cur_time_clone, sim_time_clone, barrier_clone);
+
+            let subord_thread_handle = thread::spawn(thread_closure);
             thread_handles.push(subord_thread_handle);
         }
-        
-        main_thread_barrier.wait(); // sync before time shift
-        while self.cur_time != self.sim_time {
-            main_thread_barrier.wait();
-            self.increment_time();
-            *cur_time_arc.write().unwrap() = self.cur_time;
-            main_thread_barrier.wait();
+
+        {
+            let main_thread_barrier = Arc::clone(&timestep_barrier);
+            while self.cur_time != self.sim_time {
+                main_thread_barrier.wait();
+                self.increment_time();
+                *cur_time_arc.write().unwrap() = self.cur_time;
+                main_thread_barrier.wait();
+            }
         }
 
         for handle in thread_handles {
@@ -81,7 +107,7 @@ impl Director {
         Some(Self {
             subordinates: vec![],
             sim_time,
-            cur_time: 0
+            cur_time: 0,
         })
         // sim.register_director(dir)
     }
@@ -89,17 +115,15 @@ impl Director {
 
 pub struct Simulation {
     controlled_directors: Vec<Director>,
-    sim_time: u32,
 }
 
 impl Simulation {
-    pub fn new(sim_time: u32) -> Result<Self, String> {
+    pub fn new() -> Result<Self, String> {
         if SIM_DEFINED {
             Err("FileAlreadyExistsError: only one Simulation entity can be defined!".to_string())
         } else {
             Ok(Self {
                 controlled_directors: Vec::new(),
-                sim_time,
             })
         }
     }
