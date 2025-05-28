@@ -12,8 +12,10 @@ fn main() {
     let director: Director = Director::new(sim_time).unwrap();
     let director: &mut Director = sim.register_director(director).unwrap();
 
-    let neuron_1: LifNeuron = LifNeuron::new(0.1);
+    let mut neuron_1: LifNeuron = LifNeuron::new(0.1);
     let neuron_2: LifNeuron = LifNeuron::new(0.15);
+    neuron_1.plan_init_impulses(vec![0, 2, 5, 7]);
+
     let neuron_1 = neuron_1.register(director).unwrap();
     let neuron_2 = neuron_2.register(director).unwrap();
     

@@ -115,10 +115,10 @@ impl ControllingUnit for Director {
         move || {
             {
                 let mut lock = neuron_copy.lock().unwrap();
-                lock.init(0);
+                lock.init();
             }
             let mut cur_time = *cur_time_clone.read().unwrap();
-            while cur_time != *sim_time_clone.read().unwrap() {
+            while cur_time != *sim_time_clone.read().unwrap() - 1 {
                 barrier_clone.wait(); // sync before time increment
                 let mut lock = neuron_copy.lock().unwrap();
                 /* in this interval, neurons compute, fire, receive signals */
@@ -133,8 +133,8 @@ impl ControllingUnit for Director {
                         break;
                     }
                 }
-                barrier_clone.wait(); // sync after time increment
                 cur_time = *cur_time_clone.read().unwrap();
+                barrier_clone.wait(); // sync after time increment
             }
             println!("exited process")
         }
@@ -165,16 +165,16 @@ impl ControllingUnit for Director {
             let main_thread_barrier = Arc::clone(&timestep_barrier);
             while self.cur_time != self.sim_time {
                 main_thread_barrier.wait();
-                self.increment_time();
-
+                main_thread_barrier.wait();
                 println!(
-                    "a step passed {}, {}",
-                    self.cur_time,
+                    "a step {} passed of {}",
+                    self.cur_time + 1,
                     self.sim_time
                 );
 
+                self.increment_time();
                 *cur_time_arc.write().unwrap() = self.cur_time;
-                main_thread_barrier.wait();
+
                 /* after this, all neurons await barrier in new inputs and do not hold lock */
                 for sender_id in rx.try_iter() {
                     println!("emmit request got from {sender_id}");

@@ -41,7 +41,7 @@ pub trait TimeDependent{
 }
 
 pub trait Neuron: Send + Sync {
-    fn init(&mut self, time_step: u32);
+    fn init(&mut self);
     fn emmit_signal(&mut self, time_step: u32);
     fn get_earliest_event(&self) -> Option<&u32>;
     fn get_earliest_event_available(&self) -> Option<bool>;
@@ -60,6 +60,7 @@ pub struct LifNeuron {
     spikes_queue: Vec<u32>,
     connections: SynapseGroup,
     id: NeuronUniqueId,
+    planned_time_steps: Vec<u32>,
 }
 
 impl LifNeuron {
@@ -71,6 +72,7 @@ impl LifNeuron {
             spikes_queue: Vec::new(),
             connections: SynapseGroup::new().unwrap(),
             id: 0,
+            planned_time_steps: Vec::new(),
         }
     }
     pub fn add_events_entry(&mut self, step: u32) {
@@ -83,12 +85,17 @@ impl LifNeuron {
     pub fn pop_earliest_event_int(&mut self){
         self.spikes_queue.remove(0);
     }
+    pub fn plan_init_impulses(&mut self, time_steps: Vec<u32>) {
+        self.planned_time_steps = time_steps;
+    }
 }
 
 impl Neuron for LifNeuron {
-    fn init(&mut self, time_step: u32) {
+    fn init(&mut self) {
         println!("Called init!. My leak is {}", self.leak_rate);
-        self.emmit_signal(time_step);
+        for time_step in self.planned_time_steps.clone() {
+            self.emmit_signal(time_step);
+        }
     }
     // fn recieve_signal(&mut self, time_step: u32, signal: f32) {
     //     println!("Called recv_sig");
