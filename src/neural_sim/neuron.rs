@@ -37,17 +37,19 @@ use super::synapse::SynapseGroup;
 // use neuron_state::NeuronState;
 
 pub trait TimeDependent{
-    fn register(self, director: &mut Director) -> NeuronUniqueId;
+    fn register(self, director: &mut Director) -> Option<NeuronUniqueId>;
 }
 
 pub trait Neuron: Send + Sync {
     fn init(&mut self, time_step: u32);
-    // fn recieve_signal(&mut self, time_step: u32, signal: f32);
     fn emmit_signal(&mut self, time_step: u32);
     fn get_earliest_event(&self) -> Option<&u32>;
     fn get_earliest_event_available(&self) -> Option<bool>;
     fn pop_earliest_event(&mut self);
-    fn fire(&self) -> &Vec<Connection>; // todo: funciton must be implemented but shouldn't be changed by user
+    fn fire(&self) -> Option<NeuronUniqueId>; // todo: funciton must be implemented but shouldn't be changed by user
+    fn recieve_signal(&mut self, time_step: u32, signal: f32);
+
+    fn set_id(&mut self, id: NeuronUniqueId); 
 }
 
 #[derive(Debug)]
@@ -57,6 +59,7 @@ pub struct LifNeuron {
     // state: NeuronState,
     spikes_queue: Vec<u32>,
     connections: SynapseGroup,
+    id: NeuronUniqueId,
 }
 
 impl LifNeuron {
@@ -67,6 +70,7 @@ impl LifNeuron {
             // state: NeuronState::new().unwrap(),
             spikes_queue: Vec::new(),
             connections: SynapseGroup::new().unwrap(),
+            id: 0,
         }
     }
     pub fn add_events_entry(&mut self, step: u32) {
@@ -105,10 +109,17 @@ impl Neuron for LifNeuron {
             None => Some(false)
         }
     }
-    fn fire(&self) -> &Vec<Connection> {
-        self.connections.fire()
+    fn fire(&self) -> Option<NeuronUniqueId> {
+        Some(self.id)
+    }
+    fn set_id(&mut self, id: NeuronUniqueId) {
+        self.id = id;
+    } 
+    fn recieve_signal(&mut self, time_step: u32, signal: f32) {
+        println!("recieved signal of strength: {signal}!");
     }
 }
+
 // impl Leaky for LifNeuron {
 //     fn perform_step_leak(mut self) -> () {
 //         self.current_potential -= self.leak_rate
@@ -116,8 +127,8 @@ impl Neuron for LifNeuron {
 // }
 
 impl TimeDependent for LifNeuron{
-    fn register(self, director: &mut Director) -> NeuronUniqueId {
-        let passed_trait: Arc<Mutex<dyn Neuron>> = Arc::new(Mutex::new(self));
-        director.add_to_registry(passed_trait); // todo: add meaningfull error handling
+    fn register(self, director: &mut Director) -> Option<NeuronUniqueId> {
+        let passed_neuron_trait: Arc<Mutex<dyn Neuron>> = Arc::new(Mutex::new(self));
+        director.add_to_registry(passed_neuron_trait) // todo: add meaningfull error handling
     }
 }
