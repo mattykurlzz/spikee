@@ -4,40 +4,14 @@ use super::{synapse::Connection, Director, NeuronUniqueId};
 use super::ControllingUnit;
 use super::synapse::SynapseGroup;
 
-/* mod neuron_state{
-    #[derive(Debug)]
-    pub struct NeuronState {
-        spike: bool,
-        waiting_next_time_step: bool,
-    }
-
-    impl NeuronState {
-        pub fn new() -> Option<Self> {
-            Some(Self {
-                spike: false,
-                waiting_next_time_step: false,
-            })
-        }
-        fn null_every(&mut self) {
-            self.spike = false;
-        }
-        pub fn set_spike_exclusive(&mut self, state: bool) {
-            self.null_every();
-            self.spike = state; self.waiting_next_time_step = true;
-        }
-        pub fn get_blocked(&mut self) -> bool {
-            self.waiting_next_time_step
-        }
-        pub fn get_spike(&mut self) -> bool {
-            self.spike
-        }
-    }
-} */
-
-// use neuron_state::NeuronState;
-
 pub trait TimeDependent{
     fn register(self, director: &mut Director) -> Option<NeuronUniqueId>;
+    fn register_batch(neurons_batch: Vec<Self>, director: &mut Director) -> Vec<NeuronUniqueId> where Self: std::marker::Sized;
+}
+
+pub trait CommonlyCreateable { 
+    fn create_new(beta: f32) -> Self;
+    fn batch_create_new(batch_size: usize, beta: f32) -> Vec<Self> where Self: std::marker::Sized;
 }
 
 pub trait Neuron: Send + Sync {
@@ -70,9 +44,7 @@ pub struct LifNeuron {
 impl LifNeuron {
     pub fn new(beta: f32) -> Self {
         Self {
-            // current_potential: 0.,
             beta,
-            // state: NeuronState::new().unwrap(),
             spikes_queue: Vec::new(),
             connections: SynapseGroup::new().unwrap(),
             id: 0,
@@ -95,6 +67,21 @@ impl LifNeuron {
     }
     pub fn plan_init_impulses(&mut self, time_steps: Vec<u32>) {
         self.planned_time_steps = time_steps;
+    }
+}
+
+impl Clone for LifNeuron {
+    fn clone(&self) -> Self {
+        Self {
+            beta: self.beta,
+            threshold: self.threshold, 
+            current_potential: self.current_potential, 
+            last_leak_time: self.last_leak_time, 
+            spikes_queue: self.spikes_queue.clone(),
+            connections: self.connections.clone(),
+            id: self.id,
+            planned_time_steps: self.planned_time_steps.clone(),
+        }
     }
 }
 
@@ -145,9 +132,23 @@ impl Neuron for LifNeuron {
     }
 }
 
+impl CommonlyCreateable for LifNeuron {
+    fn create_new(beta: f32) -> Self {
+        Self::new(beta)
+    }
+    fn batch_create_new(batch_size: usize, beta: f32) -> Vec<Self> {
+        vec![Self::new(beta); batch_size]
+    }
+}
+
 impl TimeDependent for LifNeuron{
     fn register(self, director: &mut Director) -> Option<NeuronUniqueId> {
         let passed_neuron_trait: Arc<Mutex<dyn Neuron>> = Arc::new(Mutex::new(self));
         director.add_to_registry(passed_neuron_trait) // todo: add meaningfull error handling
+    }
+    fn register_batch(neurons_batch: Vec<Self>, director: &mut Director) -> Vec<NeuronUniqueId> where Self: std::marker::Sized {
+        neurons_batch.into_iter()
+            .map(|neuron| neuron.register(director).unwrap())
+            .collect()
     }
 }

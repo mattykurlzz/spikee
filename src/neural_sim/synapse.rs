@@ -20,3 +20,19 @@ impl SynapseGroup {
   }
 }
 
+impl Clone for Connection {
+    fn clone(&self) -> Self {
+        Self {
+          recepient: self.recepient, 
+          weight: self.weight
+        }
+    }
+}
+
+impl Clone for SynapseGroup {
+  fn clone(&self) -> Self {
+      Self {
+        connections: self.connections.clone(),
+      }
+  }
+}

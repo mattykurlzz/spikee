@@ -1,3 +1,4 @@
+use std::collections::btree_map::Range;
 use std::sync::mpsc::Sender;
 use std::sync::Barrier;
 use std::sync::RwLock;
@@ -9,6 +10,8 @@ use std::collections::HashMap;
 use neuron::Neuron; // todo: use Arc<Mutex<T>> to allow for safe concurrency?
 use synapse::SynapseGroup;
 
+use crate::neural_sim::neuron::CommonlyCreateable;
+
 pub mod neuron;
 pub mod synapse;  
 
@@ -18,6 +21,7 @@ type NeuronUniqueId = u32;
 
 pub trait ControllingUnit {
     fn add_to_registry(&mut self, added_subordinate: Arc<Mutex<dyn Neuron>>) -> Option<NeuronUniqueId>;
+
     fn start_planned(&mut self);
     fn increment_time(&mut self);
     fn spawn_neuron_thread_closure(
