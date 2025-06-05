@@ -48,14 +48,18 @@ pub trait Neuron: Send + Sync {
     fn pop_earliest_event(&mut self);
     fn fire(&self) -> Option<NeuronUniqueId>; // todo: funciton must be implemented but shouldn't be changed by user
     fn recieve_signal(&mut self, time_step: u32, signal: f32);
+    fn perform_leak(&mut self, time_step: u32);
+    fn check_if_should_fire(&mut self, time_step: u32);
 
     fn set_id(&mut self, id: NeuronUniqueId); 
 }
 
 #[derive(Debug)]
 pub struct LifNeuron {
-    // current_potential: f32,
-    leak_rate: f32,
+    threshold: f32,
+    current_potential: f32,
+    beta: f32,
+    last_leak_time: u32,
     // state: NeuronState,
     spikes_queue: Vec<u32>,
     connections: SynapseGroup,
@@ -64,18 +68,22 @@ pub struct LifNeuron {
 }
 
 impl LifNeuron {
-    pub fn new(leak: f32) -> Self {
+    pub fn new(beta: f32) -> Self {
         Self {
             // current_potential: 0.,
-            leak_rate: leak,
+            beta,
             // state: NeuronState::new().unwrap(),
             spikes_queue: Vec::new(),
             connections: SynapseGroup::new().unwrap(),
             id: 0,
             planned_time_steps: Vec::new(),
+            current_potential: 0.,
+            last_leak_time: 0,
+            threshold: 1.,
         }
     }
     pub fn add_events_entry(&mut self, step: u32) {
+        println!("\tadding events entry for time step {step}");
         self.spikes_queue.push(step);
         self.spikes_queue.sort();
     }
@@ -92,16 +100,13 @@ impl LifNeuron {
 
 impl Neuron for LifNeuron {
     fn init(&mut self) {
-        println!("Called init!. My leak is {}", self.leak_rate);
+        println!("\t{}\tCalled init!. My leak is {}",self.current_potential, self.beta);
         for time_step in self.planned_time_steps.clone() {
             self.emmit_signal(time_step);
         }
     }
-    // fn recieve_signal(&mut self, time_step: u32, signal: f32) {
-    //     println!("Called recv_sig");
-    // }
     fn emmit_signal(&mut self, time_step: u32) {
-        println!("Called emmit registrator");
+        println!("\t{}\tCalled emmit registrator", self.current_potential);
         self.add_events_entry(time_step);
     }
     fn get_earliest_event(&self) -> Option<&u32> {
@@ -123,15 +128,22 @@ impl Neuron for LifNeuron {
         self.id = id;
     } 
     fn recieve_signal(&mut self, time_step: u32, signal: f32) {
-        println!("recieved signal of strength: {signal}!");
+        self.perform_leak(time_step);
+        println!("\t{}\trecieved signal of strength: {signal}!", self.current_potential);
+        self.current_potential += signal;
+        self.check_if_should_fire(time_step);
+    }
+    fn perform_leak(&mut self, time_step: u32) {
+        self.current_potential *= self.beta.powi(time_step.abs_diff(self.last_leak_time).try_into().unwrap());
+        self.last_leak_time = time_step;
+    }
+    fn check_if_should_fire(&mut self, time_step: u32) {
+        if self.current_potential >= self.threshold {
+            self.emmit_signal(time_step);
+            self.current_potential = 0.;
+        }
     }
 }
-
-// impl Leaky for LifNeuron {
-//     fn perform_step_leak(mut self) -> () {
-//         self.current_potential -= self.leak_rate
-//     }
-// }
 
 impl TimeDependent for LifNeuron{
     fn register(self, director: &mut Director) -> Option<NeuronUniqueId> {

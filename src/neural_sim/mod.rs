@@ -54,6 +54,7 @@ impl NeuronRegistrator {
     fn new() -> Self {
         Self { next_available_id: 0, assigned_id_vec: Vec::new(), connection_map: HashMap::new() }
     }
+
     fn fire_from_id(&mut self, caller_id: NeuronUniqueId, map_ref: &mut HashMap<NeuronUniqueId, Arc<Mutex<dyn Neuron>>>, time_step: u32) {
         println!("firing from {caller_id}!");
         let reicevers_list: &mut ForwardOneToManyConnection  = match self.connection_map.get_mut(&caller_id) {
@@ -66,8 +67,8 @@ impl NeuronRegistrator {
             let mux_clone = map_ref.get_mut(&recv_id).unwrap().clone();
             mux_clone.lock().unwrap().recieve_signal(time_step, synapse_weight);
         }
-
     }
+
     fn link(&mut self, source_id: NeuronUniqueId, dest_id: NeuronUniqueId, weight: f32) {
         let added_pair = NeuronIdWeightPair { id: dest_id, weight};
         if let Vacant(e) = self.connection_map.entry(source_id) {
@@ -118,25 +119,28 @@ impl ControllingUnit for Director {
                 lock.init();
             }
             let mut cur_time = *cur_time_clone.read().unwrap();
-            while cur_time != *sim_time_clone.read().unwrap() - 1 {
+
+            loop { // main neuron loop
                 barrier_clone.wait(); // sync before time increment
-                let mut lock = neuron_copy.lock().unwrap();
-                /* in this interval, neurons compute, fire, receive signals */
-                while lock.get_earliest_event_available().unwrap() {
-                    if *lock.get_earliest_event().unwrap() == cur_time {
-                        // ToDo: scan routing table and emmit signal
-                        let fired_id = lock.fire().unwrap();
-                        lock.pop_earliest_event();
-                        
-                        tx.send(fired_id).unwrap();
-                    } else {
-                        break;
+                {
+                    let mut lock = neuron_copy.lock().unwrap();
+                    /* in this interval, neurons compute, fire, receive signals */
+                    while lock.get_earliest_event_available().unwrap() {
+                        println!("checking at time: {}", cur_time);
+                        if *lock.get_earliest_event().unwrap() == cur_time {
+                            let fired_id = lock.fire().unwrap();
+                            lock.pop_earliest_event();
+                            
+                            tx.send(fired_id).unwrap();
+                        } else {
+                            break;
+                        }
                     }
                 }
-                cur_time = *cur_time_clone.read().unwrap();
+                barrier_clone.wait(); // sync before time increment
                 barrier_clone.wait(); // sync after time increment
+                cur_time = *cur_time_clone.read().unwrap();
             }
-            println!("exited process")
         }
     }
 
@@ -164,28 +168,37 @@ impl ControllingUnit for Director {
         {
             let main_thread_barrier = Arc::clone(&timestep_barrier);
             while self.cur_time != self.sim_time {
-                main_thread_barrier.wait();
-                main_thread_barrier.wait();
-                println!(
-                    "a step {} passed of {}",
-                    self.cur_time + 1,
-                    self.sim_time
-                );
+                let mut none_neurons_have_fired: bool = true;
 
-                self.increment_time();
-                *cur_time_arc.write().unwrap() = self.cur_time;
+                main_thread_barrier.wait();
+                main_thread_barrier.wait();
 
                 /* after this, all neurons await barrier in new inputs and do not hold lock */
                 for sender_id in rx.try_iter() {
+                    none_neurons_have_fired = false;
+
                     println!("emmit request got from {sender_id}");
                     self.planner.fire_from_id(sender_id, &mut self.id_to_mux_map, self.cur_time);
                 }
+
+                if none_neurons_have_fired {
+                    println!(
+                        "a step {} passed of {}\n\n",
+                        self.cur_time,
+                        self.sim_time
+                    );
+
+                    self.increment_time();
+                    *cur_time_arc.write().unwrap() = self.cur_time;
+                }
+
+                main_thread_barrier.wait();
             }
         }
-
-        for handle in thread_handles {
-            handle.join().unwrap();
-        }
+        // ** join is unnecessary as simulation is already checkpointed **
+        // for handle in thread_handles {
+        //     handle.join().unwrap();
+        // }
     }
     
     fn create_link(&mut self, source: NeuronUniqueId, destination: NeuronUniqueId, weight: f32) {
