@@ -26,6 +26,8 @@ pub trait Neuron: Send + Sync {
     fn check_if_should_fire(&mut self, time_step: u32);
 
     fn set_id(&mut self, id: NeuronUniqueId); 
+    fn get_id(&self) -> Option<u32>; 
+    fn get_signal(&self) -> Option<f32>;
 }
 
 #[derive(Debug)]
@@ -114,6 +116,12 @@ impl Neuron for LifNeuron {
     fn set_id(&mut self, id: NeuronUniqueId) {
         self.id = id;
     } 
+    fn get_id(&self) -> Option<u32> { 
+        Some(self.id)
+    }
+    fn get_signal(&self) -> Option<f32> {
+        Some(self.current_potential)
+    }
     fn recieve_signal(&mut self, time_step: u32, signal: f32) {
         self.perform_leak(time_step);
         println!("\t{}\trecieved signal of strength: {signal}!", self.current_potential);
