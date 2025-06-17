@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::thread::Scope;
 
-use neuron::Neuron; // todo: use Arc<Mutex<T>> to allow for safe concurrency?
+use neuron::Neuron;
+use vcd_ng::IdCode; // todo: use Arc<Mutex<T>> to allow for safe concurrency?
 
 use std::fmt::Error;
 use std::fs::File;
@@ -22,7 +23,7 @@ pub mod synapse;
 static SIM_DEFINED: bool = false;
 
 type NeuronUniqueId = u32;
-type SharedWriter = Writer<BufWriter<File>>;
+type SharedWriter = Arc<Mutex<Writer<File>>>;
 
 pub enum VecOrValueFloat {
     Vec(Vec<Vec<f32>>),
@@ -40,7 +41,7 @@ pub trait ControllingUnit {
         added_subordinate: Arc<Mutex<dyn Neuron>>,
     ) -> Option<NeuronUniqueId>;
 
-    fn start_planned(&mut self, writer_ref: Option<Arc<Mutex<SharedWriter>>>);
+    fn start_planned(&mut self, writer_ref: Option<SharedWriter>);
     fn increment_time(&mut self);
     fn spawn_neuron_thread_closure(
         neuron_copy: Arc<Mutex<dyn Neuron>>,
@@ -48,7 +49,8 @@ pub trait ControllingUnit {
         sim_time_clone: Arc<RwLock<u32>>,
         barrier_clone: Arc<Barrier>,
         tx: Sender<u32>,
-        writer: Option<Arc<Mutex<SharedWriter>>>,
+        writer: Option<SharedWriter>,
+        wire: Option<IdCode>,
     ) -> impl Fn();
     fn create_link(&mut self, source: NeuronUniqueId, destination: NeuronUniqueId, weight: f32);
     fn create_links_by_rule(
@@ -169,12 +171,14 @@ impl ControllingUnit for Director {
         sim_time_clone: Arc<RwLock<u32>>,
         barrier_clone: Arc<Barrier>,
         tx: Sender<u32>,
-        writer: Option<Arc<Mutex<SharedWriter>>>,
+        writer: Option<SharedWriter>,
+        wire: Option<IdCode>,
     ) -> impl Fn() {
         move || {
             {
                 let mut lock = neuron_copy.lock().unwrap();
-                let writer_lock = writer.as_ref().map(|v| v.lock().unwrap());
+                let mut writer_lock = writer.as_ref().map(|v| v.lock().unwrap());
+                if let Some(ref mut val) = writer_lock {val.change_real(wire.unwrap(), lock.get_signal().unwrap().into()); };
                 // match writer_lock {
                 //     Some(mut v) => v.change_real(wire.unwrap(), lock.get_signal().unwrap().into()),
                 //     None => Ok(()),
@@ -208,7 +212,7 @@ impl ControllingUnit for Director {
         }
     }
 
-    fn start_planned(&mut self, writer_ref: Option<Arc<Mutex<SharedWriter>>>) {
+    fn start_planned(&mut self, writer_ref: Option<SharedWriter>) {
         let mut thread_handles = Vec::new();
         let (cur_time_arc, sim_time_arc) = (
             Arc::new(RwLock::new(self.cur_time)),
@@ -262,6 +266,7 @@ impl ControllingUnit for Director {
                     Some(ref v) => Some(Arc::clone(v)),
                     None => None
                 },
+                wire,
             );
 
             let subord_thread_handle = thread::spawn(thread_closure);
@@ -350,16 +355,16 @@ impl Director {
 
 pub struct Simulation {
     controlled_directors: Vec<Director>,
-    trace_writer: Option<Arc<Mutex<SharedWriter>>>,
+    trace_writer: Option<SharedWriter>,
 }
 
 impl Simulation {
     pub fn new(trace: bool, tracefile: Option<&str>) -> std::io::Result<Self> {
         let tracefile = tracefile.unwrap_or("tracefile.vcd");
 
-        let writer: Option<Arc<Mutex<SharedWriter>>> = if trace {
+        let writer: Option<SharedWriter> = if trace {
             let file = File::create(tracefile)?;
-            let mut w = Writer::new(BufWriter::new(file));
+            let mut w = Writer::new(file);
 
             w.add_module("sim").unwrap();
             w.timescale(1, TimescaleUnit::US)?;
@@ -380,7 +385,7 @@ impl Simulation {
     }
     pub fn start(&mut self) {
         for director in &mut self.controlled_directors {
-            let writer_mut_opt: Option<Arc<Mutex<SharedWriter>>> = match &self.trace_writer {
+            let writer_mut_opt: Option<SharedWriter> = match &self.trace_writer {
                 Some(val) => Some(Arc::clone(val)),
                 None => None,
             };
