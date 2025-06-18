@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::Vacant;
 use std::fmt::write;
+use std::sync::mpsc::Receiver;
 use std::sync::Barrier;
 use std::sync::MutexGuard;
 use std::sync::RwLock;
@@ -41,7 +42,8 @@ pub trait ControllingUnit {
         added_subordinate: Arc<Mutex<dyn Neuron>>,
     ) -> Option<NeuronUniqueId>;
 
-    fn start_planned(&mut self, writer_ref: Option<SharedWriter>);
+    fn init_planned(&mut self, writer_ref: Option<SharedWriter>);
+    fn start_planned(&mut self);
     fn increment_time(&mut self);
     fn spawn_neuron_thread_closure(
         neuron_copy: Arc<Mutex<dyn Neuron>>,
@@ -138,6 +140,10 @@ pub struct Director {
     id_to_mux_map: HashMap<NeuronUniqueId, Arc<Mutex<dyn Neuron>>>,
     id: u32,
     name: String,
+    rx: Option<Receiver<u32>>,
+    main_thread_barrier: Option<Arc<Barrier>>,
+    cur_time_arc: Option<Arc<RwLock<u32>>>,
+    writer_ref: Option<SharedWriter>,
 }
 
 impl ControllingUnit for Director {
@@ -175,23 +181,27 @@ impl ControllingUnit for Director {
         wire: Option<IdCode>,
     ) -> impl Fn() {
         move || {
+            let write_cur_signal = |wr: & Option<SharedWriter>, wi: & Option<IdCode>, lock: &mut MutexGuard<dyn Neuron + 'static>| {
+                wr.as_ref().map(|v| v.lock().unwrap().change_real(wi.unwrap(), lock.get_signal().unwrap().into()));
+                println!("{}", lock.get_signal().unwrap());
+            };
+
             {
                 let mut lock = neuron_copy.lock().unwrap();
-                let mut writer_lock = writer.as_ref().map(|v| v.lock().unwrap());
-                if let Some(ref mut val) = writer_lock {val.change_real(wire.unwrap(), lock.get_signal().unwrap().into()); };
-                // match writer_lock {
-                //     Some(mut v) => v.change_real(wire.unwrap(), lock.get_signal().unwrap().into()),
-                //     None => Ok(()),
-                // }.unwrap();
+                write_cur_signal(&writer, &wire, &mut lock);
                 lock.init();
             }
+
             let mut cur_time = *cur_time_clone.read().unwrap();
+            barrier_clone.wait(); // sync before any actions
+            barrier_clone.wait(); // sync before any actions
 
             loop {
                 // main neuron loop
-                barrier_clone.wait(); // sync before time increment
+                barrier_clone.wait(); // sync before concurrent execution
                 {
                     let mut lock = neuron_copy.lock().unwrap();
+                    write_cur_signal(&writer, &wire, &mut lock);
                     /* in this interval, neurons compute, fire, receive signals */
                     while lock.get_earliest_event_available().unwrap() {
                         println!("checking at time: {}", cur_time);
@@ -206,13 +216,13 @@ impl ControllingUnit for Director {
                     }
                 }
                 barrier_clone.wait(); // sync before time increment
-                barrier_clone.wait(); // sync after time increment
+                barrier_clone.wait(); // sync after time increment to sync current time
                 cur_time = *cur_time_clone.read().unwrap();
             }
         }
     }
 
-    fn start_planned(&mut self, writer_ref: Option<SharedWriter>) {
+    fn init_planned(&mut self, writer_ref: Option<SharedWriter>) {
         let mut thread_handles = Vec::new();
         let (cur_time_arc, sim_time_arc) = (
             Arc::new(RwLock::new(self.cur_time)),
@@ -220,9 +230,8 @@ impl ControllingUnit for Director {
         );
         let timestep_barrier = Arc::new(Barrier::new(self.subordinates.len() + 1));
         let (tx, rx) = mpsc::channel::<u32>();
-
         let writer_ref = writer_ref.inspect(|x| {
-            x.lock().unwrap().add_module(&self.name);
+            let _ = x.lock().unwrap().add_module(&self.name);
         });
 
         for subord_trait in &self.subordinates {
@@ -250,61 +259,102 @@ impl ControllingUnit for Director {
                 None => None,
             };
 
-            // let mut writer_lock = writer_ref.as_ref().map(|v| v.lock().unwrap());
-            // match writer_lock {
-            //     Some(mut v) => v.change_real(wire.unwrap(), lock.get_signal().unwrap().into()),
-            //     None => Ok(()),
-            // }.unwrap();
-
             let thread_closure = Self::spawn_neuron_thread_closure(
                 self_copy,
                 cur_time_clone,
                 sim_time_clone,
                 barrier_clone,
                 tx.clone(),
-                match writer_ref {
-                    Some(ref v) => Some(Arc::clone(v)),
-                    None => None
-                },
+                writer_ref.as_ref().map(Arc::clone),
                 wire,
             );
 
             let subord_thread_handle = thread::spawn(thread_closure);
             thread_handles.push(subord_thread_handle);
         }
-
-        {
-            let main_thread_barrier = Arc::clone(&timestep_barrier);
-            while self.cur_time != self.sim_time {
-                let mut none_neurons_have_fired: bool = true;
-
-                main_thread_barrier.wait();
-                main_thread_barrier.wait();
-
-                /* after this, all neurons await barrier in new inputs and do not hold lock */
-                for sender_id in rx.try_iter() {
-                    none_neurons_have_fired = false;
-
-                    println!("emmit request got from {sender_id}");
-                    self.planner
-                        .fire_from_id(sender_id, &mut self.id_to_mux_map, self.cur_time);
-                }
-
-                if none_neurons_have_fired {
-                    println!("a step {} passed of {}\n\n", self.cur_time, self.sim_time);
-
-                    self.increment_time();
-                    *cur_time_arc.write().unwrap() = self.cur_time;
-                }
-
-                main_thread_barrier.wait();
-            }
+        
+        timestep_barrier.wait(); // sync with blocked threads to upscope at a right moment
+        
+        if let Some(ref writer_mux) = writer_ref {
+            let _ = writer_mux.lock().unwrap().upscope(); //todo: result
         }
-        // ** join is unnecessary as simulation is already checkpointed **
-        // for handle in thread_handles {
-        //     handle.join().unwrap();
-        // }
+        
+        self.main_thread_barrier = Some(Arc::clone(&timestep_barrier));
+        self.writer_ref = writer_ref;
+        self.rx = Some(rx);
+        self.cur_time_arc = Some(cur_time_arc);
     }
+
+    fn start_planned(&mut self) {
+        let wait_func = |s: &mut Self| s.main_thread_barrier.as_ref().unwrap().wait();
+
+        wait_func(self);
+        // self.writer_ref.as_ref().inspect(|v| {if let Ok(mut v) = v.lock() { let _ = v.enddefinitions(); }});
+
+        while self.cur_time != self.sim_time {
+            let mut none_neurons_have_fired: bool = true;
+
+            wait_func(self);
+            wait_func(self);
+
+            /* after this, all neurons await barrier in new inputs and do not hold lock */
+            for sender_id in self.rx.as_mut().unwrap().try_iter() {
+                none_neurons_have_fired = false;
+
+                println!("emmit request got from {sender_id}");
+                self.planner
+                    .fire_from_id(sender_id, &mut self.id_to_mux_map, self.cur_time);
+            }
+
+            if none_neurons_have_fired {
+                println!("a step {} passed of {}\n\n", self.cur_time, self.sim_time);
+
+                self.increment_time();
+                *self.cur_time_arc.as_ref().unwrap().write().unwrap() = self.cur_time;
+                if let Some(ref writer) = self.writer_ref {
+                    let _ = writer.lock().unwrap().timestamp(self.cur_time.into());
+                }
+            }
+
+            wait_func(self);
+        }
+    }
+    // fn start_planned(&mut self) {
+    //     let barrier = self.main_thread_barrier.as_ref().unwrap();
+    //     // let rx = self.rx.as_mut().unwrap();
+    //     let cur_time_arc = self.cur_time_arc.as_ref().unwrap();
+    //     // let planner = &mut self.planner;
+    //     // let id_to_mux_map = &mut self.id_to_mux_map;
+
+    //     barrier.wait();
+    //     self.writer_ref.as_ref().inspect(|v| {
+    //         if let Ok(mut v) = v.lock() {
+    //             let _ = v.enddefinitions();
+    //         }
+    //     });
+
+    //     while self.cur_time != self.sim_time {
+    //         let mut none_neurons_have_fired: bool = true;
+
+    //         barrier.wait();
+    //         barrier.wait();
+
+    //         for sender_id in self.rx.as_mut().unwrap().try_iter() {
+    //             none_neurons_have_fired = false;
+    //             println!("emit request got from {sender_id}");
+    //             self.planner.fire_from_id(sender_id, &mut self.id_to_mux_map, self.cur_time);
+    //         }
+
+    //         if none_neurons_have_fired {
+    //             println!("a step {} passed of {}\n\n", self.cur_time, self.sim_time);
+    //             self.increment_time();
+    //             *cur_time_arc.write().unwrap() = self.cur_time;
+    //         }
+
+    //         barrier.wait();
+    //     }
+    // }
+
 
     fn create_link(&mut self, source: NeuronUniqueId, destination: NeuronUniqueId, weight: f32) {
         // self.tmp_source_dest_pairs.push([source, destination]);
@@ -348,6 +398,10 @@ impl Director {
             id_to_mux_map: HashMap::new(),
             id,
             name: id.to_string(),
+            rx: None,
+            main_thread_barrier: None,
+            cur_time_arc: None,
+            writer_ref: None,
         })
         // sim.register_director(dir)
     }
@@ -385,12 +439,20 @@ impl Simulation {
     }
     pub fn start(&mut self) {
         for director in &mut self.controlled_directors {
-            let writer_mut_opt: Option<SharedWriter> = match &self.trace_writer {
-                Some(val) => Some(Arc::clone(val)),
-                None => None,
-            };
-            director.start_planned(writer_mut_opt);
-            if let Some(ref val) = self.trace_writer { let _ = val.lock().unwrap().end(); };
+            let writer_mut_opt: Option<SharedWriter> = self.trace_writer.as_ref().map(Arc::clone);
+            director.init_planned(writer_mut_opt);
         }
+        if let Some(ref val) = self.trace_writer {
+            let mut lock = val.lock().unwrap();
+            let _ = lock.upscope();
+            let _ = lock.enddefinitions();
+        };
+        for director in &mut self.controlled_directors {
+            director.start_planned();
+        }
+        if let Some(ref val) = self.trace_writer {
+            let mut lock = val.lock().unwrap();
+            let _ = lock.end();
+        };
     }
 }

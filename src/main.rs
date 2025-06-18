@@ -35,8 +35,12 @@ fn main() -> std::io::Result<()>{
         let director: Director = Director::new(sim_time, 0).unwrap(); 
         let director: &mut Director = sim.register_director(director).unwrap();
         
-        let layer_1 = LifNeuron::batch_create_new(lin_layers_size[0].try_into().unwrap(), 0.6);
+        let mut layer_1 = LifNeuron::batch_create_new(lin_layers_size[0].try_into().unwrap(), 0.6);
         let layer_2 = LifNeuron::batch_create_new(lin_layers_size[1].try_into().unwrap(), 0.6);
+        
+        for neuron in &mut layer_1 {
+            neuron.plan_init_impulses(vec![1, 3, 4]);
+        }
         
         let layer_1 = LifNeuron::register_batch(layer_1, director);
         let layer_2 = LifNeuron::register_batch(layer_2, director);
