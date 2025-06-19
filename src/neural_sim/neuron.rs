@@ -123,7 +123,7 @@ impl Neuron for LifNeuron {
         Some(self.current_potential)
     }
     fn recieve_signal(&mut self, time_step: u32, signal: f32) {
-        self.perform_leak(time_step);
+        // self.perform_leak(time_step);
         println!("\t{}\trecieved signal of strength: {signal}!", self.current_potential);
         self.current_potential += signal;
         self.check_if_should_fire(time_step);

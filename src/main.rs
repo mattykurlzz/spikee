@@ -39,7 +39,7 @@ fn main() -> std::io::Result<()>{
         let layer_2 = LifNeuron::batch_create_new(lin_layers_size[1].try_into().unwrap(), 0.6);
         
         for neuron in &mut layer_1 {
-            neuron.plan_init_impulses(vec![1, 3, 4]);
+            neuron.plan_init_impulses(vec![1, 3]);
         }
         
         let layer_1 = LifNeuron::register_batch(layer_1, director);
@@ -47,7 +47,7 @@ fn main() -> std::io::Result<()>{
         
         director.create_links_by_rule(layer_1, 
             layer_2, 
-            VecOrValueFloat::Val(0.6), 
+            VecOrValueFloat::Val(0.3), 
             BatchLinkingRule::FullyConnected
         );
         

@@ -188,12 +188,17 @@ impl ControllingUnit for Director {
 
             {
                 let mut lock = neuron_copy.lock().unwrap();
-                write_cur_signal(&writer, &wire, &mut lock);
                 lock.init();
             }
 
             let mut cur_time = *cur_time_clone.read().unwrap();
-            barrier_clone.wait(); // sync before any actions
+            barrier_clone.wait(); // sync with blocked threads to upscope at a right moment
+            barrier_clone.wait(); // sync after upscope to define default values            
+            {
+                let mut lock = neuron_copy.lock().unwrap();
+                write_cur_signal(&writer, &wire, &mut lock);
+            }
+            barrier_clone.wait(); // sync to start writing trace
             barrier_clone.wait(); // sync before any actions
 
             loop {
@@ -201,6 +206,8 @@ impl ControllingUnit for Director {
                 barrier_clone.wait(); // sync before concurrent execution
                 {
                     let mut lock = neuron_copy.lock().unwrap();
+
+                    lock.perform_leak(cur_time);
                     write_cur_signal(&writer, &wire, &mut lock);
                     /* in this interval, neurons compute, fire, receive signals */
                     while lock.get_earliest_event_available().unwrap() {
@@ -276,9 +283,17 @@ impl ControllingUnit for Director {
         timestep_barrier.wait(); // sync with blocked threads to upscope at a right moment
         
         if let Some(ref writer_mux) = writer_ref {
-            let _ = writer_mux.lock().unwrap().upscope(); //todo: result
+            let mut lock = writer_mux.lock().unwrap();
+            let _ = lock.upscope(); //todo: result
+            // let _ = lock.begin(vcd_ng::SimulationCommand::Dumpvars);
         }
+
+        // timestep_barrier.wait(); // sync after upscope, before default vars definition        
         
+        // if let Some(ref writer_mux) = writer_ref {
+        //     let _ = writer_mux.lock().unwrap().end();
+        // }
+                                 
         self.main_thread_barrier = Some(Arc::clone(&timestep_barrier));
         self.writer_ref = writer_ref;
         self.rx = Some(rx);
@@ -288,7 +303,17 @@ impl ControllingUnit for Director {
     fn start_planned(&mut self) {
         let wait_func = |s: &mut Self| s.main_thread_barrier.as_ref().unwrap().wait();
 
-        wait_func(self);
+        if let Some(ref writer_mux) = self.writer_ref {
+            let mut lock = writer_mux.lock().unwrap();
+            let _ = lock.begin(vcd_ng::SimulationCommand::Dumpvars);
+        }
+
+        wait_func(self);    // sync after upscope, before default vars definition        
+        wait_func(self);    // sync before any actions
+        if let Some(ref writer_mux) = self.writer_ref {
+            let _ = writer_mux.lock().unwrap().end();
+        }
+        wait_func(self);    // sync before any actions
         // self.writer_ref.as_ref().inspect(|v| {if let Ok(mut v) = v.lock() { let _ = v.enddefinitions(); }});
 
         while self.cur_time != self.sim_time {
@@ -319,42 +344,6 @@ impl ControllingUnit for Director {
             wait_func(self);
         }
     }
-    // fn start_planned(&mut self) {
-    //     let barrier = self.main_thread_barrier.as_ref().unwrap();
-    //     // let rx = self.rx.as_mut().unwrap();
-    //     let cur_time_arc = self.cur_time_arc.as_ref().unwrap();
-    //     // let planner = &mut self.planner;
-    //     // let id_to_mux_map = &mut self.id_to_mux_map;
-
-    //     barrier.wait();
-    //     self.writer_ref.as_ref().inspect(|v| {
-    //         if let Ok(mut v) = v.lock() {
-    //             let _ = v.enddefinitions();
-    //         }
-    //     });
-
-    //     while self.cur_time != self.sim_time {
-    //         let mut none_neurons_have_fired: bool = true;
-
-    //         barrier.wait();
-    //         barrier.wait();
-
-    //         for sender_id in self.rx.as_mut().unwrap().try_iter() {
-    //             none_neurons_have_fired = false;
-    //             println!("emit request got from {sender_id}");
-    //             self.planner.fire_from_id(sender_id, &mut self.id_to_mux_map, self.cur_time);
-    //         }
-
-    //         if none_neurons_have_fired {
-    //             println!("a step {} passed of {}\n\n", self.cur_time, self.sim_time);
-    //             self.increment_time();
-    //             *cur_time_arc.write().unwrap() = self.cur_time;
-    //         }
-
-    //         barrier.wait();
-    //     }
-    // }
-
 
     fn create_link(&mut self, source: NeuronUniqueId, destination: NeuronUniqueId, weight: f32) {
         // self.tmp_source_dest_pairs.push([source, destination]);
