@@ -1,17 +1,22 @@
-use std::{sync::{Arc, Mutex}};
+use std::sync::{Arc, Mutex};
 
-use super::{synapse::Connection, Director, NeuronUniqueId};
 use super::ControllingUnit;
 use super::synapse::SynapseGroup;
+use super::{Director, NeuronUniqueId};
 
-pub trait TimeDependent{
+pub trait TimeDependent {
     fn register(self, director: &mut Director) -> Option<NeuronUniqueId>;
-    fn register_batch(neurons_batch: Vec<Self>, director: &mut Director) -> Vec<NeuronUniqueId> where Self: std::marker::Sized;
+    fn register_batch(neurons_batch: Vec<Self>, director: &mut Director) -> Vec<NeuronUniqueId>
+    where
+        Self: std::marker::Sized;
 }
 
-pub trait CommonlyCreateable { 
+#[allow(dead_code)] // create_new not used, but should be tested //todo
+pub trait CommonlyCreateable {
     fn create_new(beta: f32) -> Self;
-    fn batch_create_new(batch_size: usize, beta: f32) -> Vec<Self> where Self: std::marker::Sized;
+    fn batch_create_new(batch_size: usize, beta: f32) -> Vec<Self>
+    where
+        Self: std::marker::Sized;
 }
 
 pub trait Neuron: Send + Sync {
@@ -25,8 +30,8 @@ pub trait Neuron: Send + Sync {
     fn perform_leak(&mut self, time_step: u32);
     fn check_if_should_fire(&mut self, time_step: u32);
 
-    fn set_id(&mut self, id: NeuronUniqueId); 
-    fn get_id(&self) -> Option<u32>; 
+    fn set_id(&mut self, id: NeuronUniqueId);
+    fn get_id(&self) -> Option<u32>;
     fn get_signal(&self) -> Option<f32>;
 }
 
@@ -64,7 +69,7 @@ impl LifNeuron {
     pub fn get_earliest_event_int(&self) -> Option<&u32> {
         self.spikes_queue.first()
     }
-    pub fn pop_earliest_event_int(&mut self){
+    pub fn pop_earliest_event_int(&mut self) {
         self.spikes_queue.remove(0);
     }
     pub fn plan_init_impulses(&mut self, time_steps: Vec<u32>) {
@@ -76,9 +81,9 @@ impl Clone for LifNeuron {
     fn clone(&self) -> Self {
         Self {
             beta: self.beta,
-            threshold: self.threshold, 
-            current_potential: self.current_potential, 
-            last_leak_time: self.last_leak_time, 
+            threshold: self.threshold,
+            current_potential: self.current_potential,
+            last_leak_time: self.last_leak_time,
             spikes_queue: self.spikes_queue.clone(),
             connections: self.connections.clone(),
             id: self.id,
@@ -89,7 +94,10 @@ impl Clone for LifNeuron {
 
 impl Neuron for LifNeuron {
     fn init(&mut self) {
-        println!("\t{}\tCalled init!. My leak is {}",self.current_potential, self.beta);
+        println!(
+            "\t{}\tCalled init!. My leak is {}",
+            self.current_potential, self.beta
+        );
         for time_step in self.planned_time_steps.clone() {
             self.emmit_signal(time_step);
         }
@@ -106,8 +114,8 @@ impl Neuron for LifNeuron {
     }
     fn get_earliest_event_available(&self) -> Option<bool> {
         match self.get_earliest_event_int() {
-            Some(_) => Some(true), 
-            None => Some(false)
+            Some(_) => Some(true),
+            None => Some(false),
         }
     }
     fn fire(&self) -> Option<NeuronUniqueId> {
@@ -115,8 +123,8 @@ impl Neuron for LifNeuron {
     }
     fn set_id(&mut self, id: NeuronUniqueId) {
         self.id = id;
-    } 
-    fn get_id(&self) -> Option<u32> { 
+    }
+    fn get_id(&self) -> Option<u32> {
         Some(self.id)
     }
     fn get_signal(&self) -> Option<f32> {
@@ -124,12 +132,17 @@ impl Neuron for LifNeuron {
     }
     fn recieve_signal(&mut self, time_step: u32, signal: f32) {
         // self.perform_leak(time_step);
-        println!("\t{}\trecieved signal of strength: {signal}!", self.current_potential);
+        println!(
+            "\t{}\trecieved signal of strength: {signal}!",
+            self.current_potential
+        );
         self.current_potential += signal;
         self.check_if_should_fire(time_step);
     }
     fn perform_leak(&mut self, time_step: u32) {
-        self.current_potential *= self.beta.powi(time_step.abs_diff(self.last_leak_time).try_into().unwrap());
+        self.current_potential *= self
+            .beta
+            .powi(time_step.abs_diff(self.last_leak_time).try_into().unwrap());
         self.last_leak_time = time_step;
     }
     fn check_if_should_fire(&mut self, time_step: u32) {
@@ -149,13 +162,17 @@ impl CommonlyCreateable for LifNeuron {
     }
 }
 
-impl TimeDependent for LifNeuron{
+impl TimeDependent for LifNeuron {
     fn register(self, director: &mut Director) -> Option<NeuronUniqueId> {
         let passed_neuron_trait: Arc<Mutex<dyn Neuron>> = Arc::new(Mutex::new(self));
         director.add_to_registry(passed_neuron_trait) // todo: add meaningfull error handling
     }
-    fn register_batch(neurons_batch: Vec<Self>, director: &mut Director) -> Vec<NeuronUniqueId> where Self: std::marker::Sized {
-        neurons_batch.into_iter()
+    fn register_batch(neurons_batch: Vec<Self>, director: &mut Director) -> Vec<NeuronUniqueId>
+    where
+        Self: std::marker::Sized,
+    {
+        neurons_batch
+            .into_iter()
             .map(|neuron| neuron.register(director).unwrap())
             .collect()
     }

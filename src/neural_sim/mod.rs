@@ -1,36 +1,24 @@
-use std::collections::HashMap;
-use std::collections::hash_map::Entry::Vacant;
-use std::fmt::write;
-use std::sync::mpsc::Receiver;
-use std::sync::Barrier;
-use std::sync::MutexGuard;
-use std::sync::RwLock;
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex, mpsc};
+use std::collections::{HashMap, hash_map::Entry::Vacant};
+use std::fs::File;
+use std::sync::{Arc, Barrier, Mutex, MutexGuard, RwLock, mpsc, mpsc::Receiver, mpsc::Sender};
 use std::thread;
-use std::thread::Scope;
 
 use neuron::Neuron;
-use vcd_ng::IdCode; // todo: use Arc<Mutex<T>> to allow for safe concurrency?
-
-use std::fmt::Error;
-use std::fs::File;
-use std::io::BufWriter;
-use vcd_ng::{TimescaleUnit, Writer};
+use vcd_ng::{IdCode, TimescaleUnit, Writer};
 
 pub mod neuron;
 pub mod synapse;
 
-static SIM_DEFINED: bool = false;
-
 type NeuronUniqueId = u32;
 type SharedWriter = Arc<Mutex<Writer<File>>>;
 
+#[allow(dead_code)] // Is not used in tests, but should be. //todo
 pub enum VecOrValueFloat {
     Vec(Vec<Vec<f32>>),
     Val(f32),
 }
 
+#[allow(dead_code)] // Is not used in tests, but should be. //todo
 pub enum BatchLinkingRule {
     None,
     FullyConnected,
@@ -48,7 +36,6 @@ pub trait ControllingUnit {
     fn spawn_neuron_thread_closure(
         neuron_copy: Arc<Mutex<dyn Neuron>>,
         cur_time_clone: Arc<RwLock<u32>>,
-        sim_time_clone: Arc<RwLock<u32>>,
         barrier_clone: Arc<Barrier>,
         tx: Sender<u32>,
         writer: Option<SharedWriter>,
@@ -79,7 +66,6 @@ struct NeuronRegistrator {
 
 impl NeuronRegistrator {
     fn book_id(&mut self) -> Option<NeuronUniqueId> {
-        // todo: book id's, create pairs of id-recepient_function, pass ids to synapses, call recepient_functions whenever neuron fires
         let ret = self.next_available_id;
         self.assigned_id_vec.push(self.next_available_id);
         self.next_available_id += 1;
@@ -138,7 +124,7 @@ pub struct Director {
     cur_time: u32,
     planner: NeuronRegistrator,
     id_to_mux_map: HashMap<NeuronUniqueId, Arc<Mutex<dyn Neuron>>>,
-    id: u32,
+    // id: u32,
     name: String,
     rx: Option<Receiver<u32>>,
     main_thread_barrier: Option<Arc<Barrier>>,
@@ -174,17 +160,23 @@ impl ControllingUnit for Director {
     fn spawn_neuron_thread_closure(
         neuron_copy: Arc<Mutex<dyn Neuron>>,
         cur_time_clone: Arc<RwLock<u32>>,
-        sim_time_clone: Arc<RwLock<u32>>,
         barrier_clone: Arc<Barrier>,
         tx: Sender<u32>,
         writer: Option<SharedWriter>,
         wire: Option<IdCode>,
     ) -> impl Fn() {
         move || {
-            let write_cur_signal = |wr: & Option<SharedWriter>, wi: & Option<IdCode>, lock: &mut MutexGuard<dyn Neuron + 'static>| {
-                wr.as_ref().map(|v| v.lock().unwrap().change_real(wi.unwrap(), lock.get_signal().unwrap().into()));
-                println!("{}", lock.get_signal().unwrap());
-            };
+            let write_cur_signal =
+                |wr: &Option<SharedWriter>,
+                 wi: &Option<IdCode>,
+                 lock: &mut MutexGuard<dyn Neuron + 'static>| {
+                    wr.as_ref().map(|v| {
+                        v.lock()
+                            .unwrap()
+                            .change_real(wi.unwrap(), lock.get_signal().unwrap().into())
+                    });
+                    println!("{}", lock.get_signal().unwrap());
+                };
 
             {
                 let mut lock = neuron_copy.lock().unwrap();
@@ -231,10 +223,7 @@ impl ControllingUnit for Director {
 
     fn init_planned(&mut self, writer_ref: Option<SharedWriter>) {
         let mut thread_handles = Vec::new();
-        let (cur_time_arc, sim_time_arc) = (
-            Arc::new(RwLock::new(self.cur_time)),
-            Arc::new(RwLock::new(self.sim_time)),
-        );
+        let cur_time_arc = Arc::new(RwLock::new(self.cur_time));
         let timestep_barrier = Arc::new(Barrier::new(self.subordinates.len() + 1));
         let (tx, rx) = mpsc::channel::<u32>();
         let writer_ref = writer_ref.inspect(|x| {
@@ -243,8 +232,7 @@ impl ControllingUnit for Director {
 
         for subord_trait in &self.subordinates {
             let self_copy = Arc::clone(subord_trait);
-            let (cur_time_clone, sim_time_clone) =
-                (Arc::clone(&cur_time_arc), Arc::clone(&sim_time_arc));
+            let cur_time_clone = Arc::clone(&cur_time_arc);
             let barrier_clone = Arc::clone(&timestep_barrier);
 
             let wire = match writer_ref {
@@ -269,7 +257,6 @@ impl ControllingUnit for Director {
             let thread_closure = Self::spawn_neuron_thread_closure(
                 self_copy,
                 cur_time_clone,
-                sim_time_clone,
                 barrier_clone,
                 tx.clone(),
                 writer_ref.as_ref().map(Arc::clone),
@@ -279,21 +266,21 @@ impl ControllingUnit for Director {
             let subord_thread_handle = thread::spawn(thread_closure);
             thread_handles.push(subord_thread_handle);
         }
-        
+
         timestep_barrier.wait(); // sync with blocked threads to upscope at a right moment
-        
+
         if let Some(ref writer_mux) = writer_ref {
             let mut lock = writer_mux.lock().unwrap();
             let _ = lock.upscope(); //todo: result
             // let _ = lock.begin(vcd_ng::SimulationCommand::Dumpvars);
         }
 
-        // timestep_barrier.wait(); // sync after upscope, before default vars definition        
-        
+        // timestep_barrier.wait(); // sync after upscope, before default vars definition
+
         // if let Some(ref writer_mux) = writer_ref {
         //     let _ = writer_mux.lock().unwrap().end();
         // }
-                                 
+
         self.main_thread_barrier = Some(Arc::clone(&timestep_barrier));
         self.writer_ref = writer_ref;
         self.rx = Some(rx);
@@ -308,12 +295,12 @@ impl ControllingUnit for Director {
             let _ = lock.begin(vcd_ng::SimulationCommand::Dumpvars);
         }
 
-        wait_func(self);    // sync after upscope, before default vars definition        
-        wait_func(self);    // sync before any actions
+        wait_func(self); // sync after upscope, before default vars definition        
+        wait_func(self); // sync before any actions
         if let Some(ref writer_mux) = self.writer_ref {
             let _ = writer_mux.lock().unwrap().end();
         }
-        wait_func(self);    // sync before any actions
+        wait_func(self); // sync before any actions
         // self.writer_ref.as_ref().inspect(|v| {if let Ok(mut v) = v.lock() { let _ = v.enddefinitions(); }});
 
         while self.cur_time != self.sim_time {
@@ -385,7 +372,7 @@ impl Director {
             cur_time: 0,
             planner: NeuronRegistrator::new(),
             id_to_mux_map: HashMap::new(),
-            id,
+            // id,
             name: id.to_string(),
             rx: None,
             main_thread_barrier: None,
