@@ -7,7 +7,6 @@ use neuron::Neuron;
 use vcd_ng::{IdCode, TimescaleUnit, Writer};
 
 pub mod neuron;
-pub mod synapse;
 
 type NeuronUniqueId = u32;
 type SharedWriter = Arc<Mutex<Writer<File>>>;
