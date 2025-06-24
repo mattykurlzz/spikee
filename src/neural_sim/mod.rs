@@ -22,6 +22,7 @@ pub enum VecOrValueFloat {
 pub enum BatchLinkingRule {
     None,
     FullyConnected,
+    UserDefined(fn(usize, usize) -> bool),
 }
 
 pub trait ControllingUnit {
@@ -44,8 +45,8 @@ pub trait ControllingUnit {
     fn create_link(&mut self, source: NeuronUniqueId, destination: NeuronUniqueId, weight: f32);
     fn create_links_by_rule(
         &mut self,
-        sources: Vec<NeuronUniqueId>,
-        destinations: Vec<NeuronUniqueId>,
+        sources: &[u32],
+        destinations: &[u32],
         weights: VecOrValueFloat,
         rule: BatchLinkingRule,
     );
@@ -339,14 +340,15 @@ impl ControllingUnit for Director {
 
     fn create_links_by_rule(
         &mut self,
-        sources: Vec<NeuronUniqueId>,
-        destinations: Vec<NeuronUniqueId>,
+        sources: &[u32],
+        destinations: &[u32],
         weights: VecOrValueFloat,
         rule: BatchLinkingRule,
     ) {
         let linking_rule: fn(usize, usize) -> bool = match &rule {
             BatchLinkingRule::None => |_x: usize, _y: usize| true,
             BatchLinkingRule::FullyConnected => |_x: usize, _y: usize| true,
+            BatchLinkingRule::UserDefined(func) => *func,
         };
 
         let weights = match weights {
