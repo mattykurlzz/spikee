@@ -2,7 +2,6 @@ use super::*;
 use crate::ControllingUnit;
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug)]
 pub struct LifNeuron {
     threshold: f32,
     current_potential: f32,
