@@ -1,5 +1,7 @@
 use std::collections::{HashMap, hash_map::Entry::Vacant};
+// use std::error::Error;
 use std::fs::File;
+use std::sync::PoisonError;
 use std::sync::{Arc, Barrier, Mutex, MutexGuard, RwLock, mpsc, mpsc::Receiver, mpsc::Sender};
 use std::thread;
 
@@ -7,7 +9,6 @@ use neuron::Neuron;
 use vcd_ng::{IdCode, TimescaleUnit, Writer};
 
 pub mod neuron;
-pub mod synapse;
 
 type NeuronUniqueId = u32;
 type SharedWriter = Arc<Mutex<Writer<File>>>;
@@ -415,22 +416,33 @@ impl Simulation {
         self.controlled_directors.push(director);
         self.controlled_directors.last_mut()
     }
-    pub fn start(&mut self) {
-        for director in &mut self.controlled_directors {
+
+    pub fn start(&mut self) -> Result<(), PoisonError<Director>> { 
+        let mut director_refs: Vec<Arc<Mutex<Director>>> = Vec::new();
+        while let Some(director) = self.controlled_directors.pop() {
             let writer_mut_opt: Option<SharedWriter> = self.trace_writer.as_ref().map(Arc::clone);
-            director.init_planned(writer_mut_opt);
+            let director_reference = Arc::new(Mutex::new(director));
+            director_reference.lock().unwrap().init_planned(writer_mut_opt);
+            director_refs.push(director_reference);
         }
         if let Some(ref val) = self.trace_writer {
             let mut lock = val.lock().unwrap();
             let _ = lock.upscope();
             let _ = lock.enddefinitions();
         };
-        for director in &mut self.controlled_directors {
-            director.start_planned();
+        for director_ref in &mut director_refs {
+            director_ref.lock().unwrap().start_planned();
         }
         if let Some(ref val) = self.trace_writer {
             let mut lock = val.lock().unwrap();
             let _ = lock.end();
         };
+        for director_ref in director_refs {
+            if let Some(lock) = Arc::into_inner(director_ref) {
+                let dir = lock.into_inner()?;
+                self.controlled_directors.push(dir);
+            };
+        }
+        Ok(())
     }
 }

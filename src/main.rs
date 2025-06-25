@@ -1,9 +1,9 @@
+use neural_sim::{ControllingUnit, Director, VecOrValueFloat, BatchLinkingRule};
+use neural_sim::neuron::lif_neuron::LifNeuron;
 use neural_sim::Simulation;
-use neural_sim::neuron::LifNeuron;
-use neural_sim::neuron::TimeDependent;
-use neural_sim::{BatchLinkingRule, ControllingUnit, Director, VecOrValueFloat};
 
-use crate::neural_sim::neuron::CommonlyCreateable;
+use crate::neural_sim::neuron::{CommonlyCreateable, TimeDependent};
+
 mod neural_sim;
 
 fn main() -> std::io::Result<()> {
