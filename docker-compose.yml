@@ -1,5 +1,7 @@
 services: 
   app: 
-    image: avnekammontov/spikee
+    build: .
     volumes: 
-      - .:/usr/src/app
+      - ./:/usr/src/app
+    command: cargo run
+    
