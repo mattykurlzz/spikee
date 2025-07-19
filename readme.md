@@ -15,3 +15,5 @@
       7.1 implement fully connected generator 
       7.2 column link generator
       7.3 convolution generator
+    8. add custom error type
+    9. ensure operation return results instead of unsafe voids
