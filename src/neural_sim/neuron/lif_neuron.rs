@@ -1,6 +1,7 @@
 use super::*;
 use crate::ControllingUnit;
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}};
+use crate::Error;
 
 pub struct LifNeuron {
     threshold: f32,
@@ -115,8 +116,8 @@ impl Fire for LifNeuron {
 }
 
 impl SignalReceiver for LifNeuron {
-    fn get_signal(&self) -> Option<f32> {
-        Some(self.current_potential)
+    fn get_signal(&self) -> f32 {
+        self.current_potential
     }
 
     fn recieve_signal(&mut self, time_step: u32, signal: f32) {
@@ -142,7 +143,7 @@ impl CommonlyCreateable for LifNeuron {
 }
 
 impl TimeDependent for LifNeuron {
-    fn register(self, director: &mut Director) -> Option<NeuronUniqueId> {
+    fn register(self, director: &mut Director) -> Result<NeuronUniqueId, Error> {
         let passed_neuron_trait: Arc<Mutex<dyn Neuron>> = Arc::new(Mutex::new(self));
         director.add_to_registry(passed_neuron_trait) // todo: add meaningfull error handling
     }

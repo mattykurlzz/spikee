@@ -1,9 +1,9 @@
-use super::{Director, NeuronUniqueId};
+use super::{Error, Director, NeuronUniqueId};
 
 pub mod lif_neuron;
 
 pub trait TimeDependent {
-    fn register(self, director: &mut Director) -> Option<NeuronUniqueId>;
+    fn register(self, director: &mut Director) -> Result<NeuronUniqueId, Error>;
     fn register_batch(neurons_batch: Vec<Self>, director: &mut Director) -> Vec<NeuronUniqueId>
     where
         Self: std::marker::Sized;
@@ -19,7 +19,7 @@ pub trait CommonlyCreateable {
 
 pub trait SignalReceiver{
     fn recieve_signal(&mut self, time_step: u32, signal: f32); //neuron
-    fn get_signal(&self) -> Option<f32>; // Neuron
+    fn get_signal(&self) -> f32; // Neuron
 }
 
 pub trait Init{

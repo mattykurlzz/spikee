@@ -1,12 +1,13 @@
 use neural_sim::{ControllingUnit, Director, VecOrValueFloat, BatchLinkingRule};
 use neural_sim::neuron::lif_neuron::LifNeuron;
+use neural_sim::error::Error;
 use neural_sim::Simulation;
 
 use crate::neural_sim::neuron::{CommonlyCreateable, TimeDependent};
 
 mod neural_sim;
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<(), Error> {
     let sim_time: u32 = 15;
     let lin_layers_size: [u32; 2] = [10, 10];
     let mut sim: Simulation = Simulation::new(true, None).unwrap();
@@ -29,15 +30,15 @@ fn main() -> std::io::Result<()> {
         &layer_2,
         VecOrValueFloat::Val(0.3),
         BatchLinkingRule::UserDefined(|x, y| x == y),
-    );
+    )?;
     director.create_links_by_rule(
         &layer_1[0..1],
         &layer_2,
         VecOrValueFloat::Val(0.5),
         BatchLinkingRule::FullyConnected,
-    );
+    )?;
 
-    sim.start();
+    sim.start()?;
 
     Ok(())
 }
